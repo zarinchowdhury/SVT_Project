@@ -1,0 +1,238 @@
+import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
+import static org.mockito.Mockito.*;
+import org.mockito.MockedStatic;
+import org.mockito.Mockito;
+
+import javax.swing.*;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.contains;
+import static org.mockito.Mockito.times;
+
+@TestInstance(TestInstance.Lifecycle.PER_METHOD)
+class CoachingCenterManagementSystemTest {
+
+    private CoachingCenterManagementSystem app;
+
+    @BeforeEach
+    void setUp() throws Exception {
+        System.setProperty("java.awt.headless", "true");
+        // Build UI on EDT to be safe
+        SwingUtilities.invokeAndWait(() -> app = new CoachingCenterManagementSystem());
+    }
+
+    @AfterEach
+    void tearDown() throws Exception {
+        if (app != null) {
+            SwingUtilities.invokeAndWait(() -> app.dispose());
+        }
+    }
+
+    // ---------- Helpers to access private fields/methods ----------
+    private <T> T getField(String name, Class<T> type) throws Exception {
+        Field f = CoachingCenterManagementSystem.class.getDeclaredField(name);
+        f.setAccessible(true);
+        return type.cast(f.get(app));
+    }
+
+    private void setText(JTextField field, String value) {
+        field.setText(value);
+    }
+
+    private void invokePrivate(String methodName) throws Exception {
+        Method m = CoachingCenterManagementSystem.class.getDeclaredMethod(methodName);
+        m.setAccessible(true);
+        m.invoke(app);
+    }
+
+    @SuppressWarnings("unchecked")
+    private <E> List<E> getList(String fieldName) throws Exception {
+        Field f = CoachingCenterManagementSystem.class.getDeclaredField(fieldName);
+        f.setAccessible(true);
+        return (List<E>) f.get(app);
+    }
+
+    // ---------- STUDENT FLOW TESTS ----------
+    @Test
+    void addUpdateRemoveStudent_flow_ok() throws Exception {
+        try (MockedStatic<JOptionPane> mocked = Mockito.mockStatic(JOptionPane.class)) {
+            // Add student
+            JTextField name = getField("studentNameField", JTextField.class);
+            JTextField age = getField("studentAgeField", JTextField.class);
+            JTextField contact = getField("studentContactField", JTextField.class);
+            JTextField email = getField("studentEmailField", JTextField.class);
+
+            setText(name, "Riya");
+            setText(age, "20");
+            setText(contact, "01700000000");
+            setText(email, "riya@example.com");
+
+            invokePrivate("addStudent");
+
+            List<Student1> students = getList("students");
+            assertEquals(1, students.size());
+            Student1 s = students.get(0);
+            assertEquals("Riya", s.getName());
+            assertEquals(20, s.getAge());
+
+            // Update student
+            JList<Student1> list = getField("studentJList", JList.class);
+            list.setSelectedIndex(0);
+
+            setText(name, "Riya S.");
+            setText(age, "21");
+            setText(contact, "01811111111");
+            setText(email, "riya.s@example.com");
+            invokePrivate("updateStudent");
+
+            assertEquals("Riya S.", students.get(0).getName());
+            assertEquals(21, students.get(0).getAge());
+
+            // Remove student
+            list.setSelectedIndex(0);
+            invokePrivate("removeStudent");
+            students = getList("students");
+            assertTrue(students.isEmpty());
+
+            // Ensure no unexpected dialogs occurred
+            mocked.verify(() -> JOptionPane.showMessageDialog(any(), any()), times(0));
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "0", "-1", "abc", "   "})
+    void addStudent_invalidAge_showsDialogAndNoAdd(String ageValue) throws Exception {
+        try (MockedStatic<JOptionPane> mocked = Mockito.mockStatic(JOptionPane.class)) {
+            JTextField name = getField("studentNameField", JTextField.class);
+            JTextField age = getField("studentAgeField", JTextField.class);
+            JTextField contact = getField("studentContactField", JTextField.class);
+            JTextField email = getField("studentEmailField", JTextField.class);
+
+            setText(name, "Tom");
+            setText(age, ageValue);
+            setText(contact, "017XX");
+            setText(email, "t@e.com");
+
+            invokePrivate("addStudent");
+
+            List<Student1> students = getList("students");
+            assertEquals(0, students.size());
+            mocked.verify(() -> JOptionPane.showMessageDialog(any(), contains("valid")), times(1));
+        }
+    }
+
+    // ---------- COURSE FLOW TESTS ----------
+    @Test
+    void addUpdateAssignRemoveCourse_flow_ok() throws Exception {
+        try (MockedStatic<JOptionPane> mocked = Mockito.mockStatic(JOptionPane.class)) {
+            JTextField courseName = getField("courseNameField", JTextField.class);
+            JTextField instructor = getField("instructorNameField", JTextField.class);
+
+            // Add course
+            setText(courseName, "Algorithms");
+            invokePrivate("addCourse");
+
+            List<Course> courses = getList("courses");
+            assertEquals(1, courses.size());
+            assertEquals("Algorithms", courses.get(0).getCourseName());
+
+            // Update course name
+            JList<Course> courseList = getField("courseJList", JList.class);
+            courseList.setSelectedIndex(0);
+            setText(courseName, "Advanced Algorithms");
+            invokePrivate("updateCourse");
+
+            courses = getList("courses");
+            assertEquals("Advanced Algorithms", courses.get(0).getCourseName());
+
+            // Assign instructor
+            courseList.setSelectedIndex(0);
+            setText(instructor, "Prof. Roy");
+            invokePrivate("assignInstructor");
+            assertEquals("Prof. Roy", courses.get(0).getInstructorName());
+
+            // Remove course
+            courseList.setSelectedIndex(0);
+            invokePrivate("removeCourse");
+            courses = getList("courses");
+            assertEquals(0, courses.size());
+
+            mocked.verify(() -> JOptionPane.showMessageDialog(any(), any()), times(0));
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "Java,Java",         // duplicate same case
+            "Data, data",        // duplicate ignore case
+            " ML ,ml  "          // with spaces/trim
+    })
+    void addCourse_duplicateName_blocked(String first, String second) throws Exception {
+        try (MockedStatic<JOptionPane> mocked = Mockito.mockStatic(JOptionPane.class)) {
+            JTextField courseName = getField("courseNameField", JTextField.class);
+
+            setText(courseName, first);
+            invokePrivate("addCourse");
+
+            setText(courseName, second);
+            invokePrivate("addCourse");
+
+            List<Course> courses = getList("courses");
+            assertEquals(1, courses.size(), "Duplicate course must not be added");
+            mocked.verify(() -> JOptionPane.showMessageDialog(any(), contains("already exists")), times(1));
+        }
+    }
+
+    // ---------- ENROLLMENT TESTS ----------
+    @Test
+    void enrollStudent_preventsDuplicates() throws Exception {
+        try (MockedStatic<JOptionPane> mocked = Mockito.mockStatic(JOptionPane.class)) {
+            // Prepare one student + one course
+            JTextField name = getField("studentNameField", JTextField.class);
+            JTextField age = getField("studentAgeField", JTextField.class);
+            JTextField contact = getField("studentContactField", JTextField.class);
+            JTextField email = getField("studentEmailField", JTextField.class);
+            setText(name, "Ivy");
+            setText(age, "19");
+            setText(contact, "017");
+            setText(email, "ivy@x.com");
+            invokePrivate("addStudent");
+
+            JTextField courseName = getField("courseNameField", JTextField.class);
+            setText(courseName, "Databases");
+            invokePrivate("addCourse");
+
+            // Refresh combos
+            Method refreshCombos = CoachingCenterManagementSystem.class
+                    .getDeclaredMethod("refreshEnrollmentCombos");
+            refreshCombos.setAccessible(true);
+            refreshCombos.invoke(app);
+
+            JComboBox<Student1> studentCb = getField("enrollmentStudentComboBox", JComboBox.class);
+            JComboBox<Course> courseCb = getField("enrollmentCourseComboBox", JComboBox.class);
+
+            studentCb.setSelectedIndex(0);
+            courseCb.setSelectedIndex(0);
+
+            // First enrollment ok
+            invokePrivate("enrollStudentInCourse");
+
+            List<Enrollment> enrollments = getList("enrollments");
+            assertEquals(1, enrollments.size());
+
+            // Duplicate enrollment -> blocked + dialog
+            invokePrivate("enrollStudentInCourse");
+
+            enrollments = getList("enrollments");
+            assertEquals(1, enrollments.size(), "Duplicate enrollment must not be added");
+            mocked.verify(() -> JOptionPane.showMessageDialog(any(), contains("already enrolled")), times(1));
+        }
+    }
+}
